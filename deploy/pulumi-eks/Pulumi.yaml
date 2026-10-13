@@ -1,0 +1,13 @@
+name: pgfleet-eks
+runtime: nodejs
+description: EKS cluster with EBS CSI (expandable gp3) running the pgfleet operator
+config:
+  pgfleet:image:
+    type: string
+    default: ghcr.io/adarsh-sgh/pgfleet:latest
+  pgfleet:nodeCount:
+    type: integer
+    default: 3
+  pgfleet:instanceType:
+    type: string
+    default: m7g.large

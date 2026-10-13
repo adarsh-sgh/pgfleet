@@ -1,0 +1,20 @@
+apiVersion: pgfleet.dev/v1alpha1
+kind: WarmPool
+metadata:
+  name: small
+spec:
+  size: 2
+  version: "17"
+  resources: {cpu: 500m, memory: 512Mi}
+  storage: 1Gi
+---
+apiVersion: pgfleet.dev/v1alpha1
+kind: PostgresInstance
+metadata:
+  name: app-db
+spec:
+  version: "17"
+  poolRef: small
+  resources: {cpu: "1", memory: 512Mi} # resized in place after the claim
+  storage: 5Gi                         # pool volume expanded after the claim
+  deletionPolicy: Retain

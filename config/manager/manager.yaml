@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pgfleet-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pgfleet
+  namespace: pgfleet-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pgfleet
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pgfleet
+subjects:
+  - kind: ServiceAccount
+    name: pgfleet
+    namespace: pgfleet-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgfleet
+  namespace: pgfleet-system
+spec:
+  replicas: 2 # one active, one standby via leader election
+  selector:
+    matchLabels: {app: pgfleet}
+  template:
+    metadata:
+      labels: {app: pgfleet}
+    spec:
+      serviceAccountName: pgfleet
+      securityContext: {runAsNonRoot: true}
+      containers:
+        - name: manager
+          image: ghcr.io/adarsh-sgh/pgfleet:latest
+          args: [--leader-elect, --shards=4, --workers-per-shard=8]
+          ports:
+            - {name: metrics, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8081}
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8081}
+          resources:
+            requests: {cpu: 200m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
