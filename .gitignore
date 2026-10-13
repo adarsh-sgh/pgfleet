@@ -1,0 +1,6 @@
+bin/
+results/raw/
+*.kubeconfig
+node_modules/
+deploy/pulumi-eks/bin/
+.DS_Store
