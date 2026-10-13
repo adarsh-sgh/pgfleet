@@ -1,0 +1,37 @@
+cold-0    7.27s
+cold-1    6.75s
+cold-2    7.08s
+cold-3    6.21s
+cold-4    4.94s
+cold-5    6.78s
+cold-6    6.76s
+cold-7    7.82s
+cold-8    4.93s
+cold-9    6.97s
+warm-0    0.19s
+warm-1    0.09s
+warm-2    0.05s
+warm-3    0.28s
+warm-4    0.22s
+warm-5    0.27s
+warm-6    0.20s
+warm-7    0.34s
+warm-8    0.20s
+warm-9    0.14s
+
+| mode | trials | p50 | max |
+|---|--:|--:|--:|
+| cold | 10 | 6.78s | 7.82s |
+| warm | 10 | 0.20s | 0.34s |
+cold-0   61.71s
+cold-1   54.92s
+cold-2   59.92s
+cold-3   57.00s
+cold-4   68.99s
+
+| mode | trials | p50 | max |
+|---|--:|--:|--:|
+| cold | 5 | 59.92s | 68.99s |
+
+Server Version: v1.36.1
+kind v0.32.0 go1.26.3 darwin/arm64

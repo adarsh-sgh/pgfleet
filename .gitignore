@@ -4,3 +4,4 @@ results/raw/
 node_modules/
 deploy/pulumi-eks/bin/
 .DS_Store
+results/*.log
