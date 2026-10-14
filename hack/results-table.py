@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Prints the README's benchmark tables from results/*.json."""
-import glob
+import re
 import json
 import os
 
@@ -25,20 +25,28 @@ def le(q):
     return "> 1000s" if b == -1 else f"≤ {b:g}s"
 
 
-def load():
-    print("| config | phase | wall | reconciles | reconcile p50 | reconcile p99 | queue wait p99 | create→Ready p50 / p99 |")
-    print("|---|---|--:|--:|--:|--:|--:|--:|")
-    for f in sorted(glob.glob(os.path.join(root, "loadtest-*.json"))):
+def load(phases):
+    """One row per run and phase, in the order hack/loadtest-matrix.sh ran them (later runs ran hotter)."""
+    print("| # | config | pods | phase | wall | reconciles | reconcile p50 | reconcile p99 | queue wait p99 | create→Ready p50 / p99 |")
+    print("|--:|---|--:|---|--:|--:|--:|--:|--:|--:|")
+    matrix = open(os.path.join(os.path.dirname(__file__), "loadtest-matrix.sh")).read()
+    order = re.findall(r"^run (\S+)", matrix, re.M)  # execution order
+    for n, label in enumerate(order, 1):
+        f = os.path.join(root, f"loadtest-{label}.json")
+        if not os.path.exists(f):
+            continue
         r = json.load(open(f))
         for p in r["phases"]:
-            if p["name"] == "pools":
+            if p["name"] not in phases:
                 continue
             e2e = p.get("create_to_ready") or {}
             e = f"{ms(e2e, 'p50_s')} / {ms(e2e)}" if e2e.get("count") else ""
-            print(f"| {r['label']} ({r['pods_at_peak']} pods) | {p['name']} | {p['seconds']:.0f}s | {p['reconcile_time']['count']} "
+            print(f"| {n} | {r['label']} | {r['pods_at_peak']} | {p['name']} | {p['seconds']:.0f}s | {p['reconcile_time']['count']} "
                   f"| {ms(p['reconcile_time'], 'p50_s')} | {ms(p['reconcile_time'])} | {le(p['queue_wait'])} | {e} |")
 
 
 kind()
 print()
-load()
+load({"create"})
+print()
+load({"restart-resync", "delete"})

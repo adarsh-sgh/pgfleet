@@ -12,3 +12,7 @@ run shards4-w8-r100 4 8 100 19000
 run shards4-w8-r200 4 8 200 19000
 run shards1-w32-r100 1 32 100 19000
 run shards4-w8-r100-clusterip-4k 4 8 100 4000 -cluster-ip-services
+# Repeats for the shard comparison (single runs vary by ~2x at the tail).
+run shards1-w32-r50 1 32 50 19000
+run shards4-w8-r100-rep2 4 8 100 19000
+run shards1-w32-r100-rep2 1 32 100 19000

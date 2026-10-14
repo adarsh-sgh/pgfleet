@@ -1,0 +1,233 @@
+{
+  "label": "shards1-w32-r100-rep2",
+  "manager_args": "-metrics-bind-address :19080 -health-probe-bind-address :19081 -rotate-credentials=false     -shards 1 -workers-per-shard 32 -kube-api-qps 2000 -kube-api-burst 4000 ",
+  "instances": 19000,
+  "pods_at_peak": 20000,
+  "pods_running_ready_at_peak": 20000,
+  "nodes": 25,
+  "pod_source": {
+    "conflict": 141,
+    "warm": 19000
+  },
+  "phases": [
+    {
+      "name": "pools",
+      "seconds": 3.1,
+      "reconcile_time": {
+        "count": 0,
+        "p50_s": 0,
+        "p99_s": 0
+      },
+      "queue_wait": {
+        "count": 0,
+        "p50_s": 0,
+        "p99_s": 0
+      },
+      "pool_reconcile_time": {
+        "count": 980,
+        "p50_s": 0.0026,
+        "p99_s": 0.0873,
+        "p99_bucket_le": 0.1
+      },
+      "reconcile_errors": 0,
+      "create_to_ready": {
+        "count": 0,
+        "p50_s": 0,
+        "p99_s": 0
+      },
+      "api_requests": {
+        "GET secrets": {
+          "count": 10,
+          "p50_s": 0.0025,
+          "p99_s": 0.0098,
+          "p99_bucket_le": 0.01
+        },
+        "PATCH warmpools/status": {
+          "count": 20,
+          "p50_s": 0.0031,
+          "p99_s": 0.0235,
+          "p99_bucket_le": 0.025
+        },
+        "POST pods": {
+          "count": 1000,
+          "p50_s": 0.0097,
+          "p99_s": 0.1,
+          "p99_bucket_le": 0.1
+        },
+        "POST secrets": {
+          "count": 10,
+          "p50_s": 0.0033,
+          "p99_s": 0.0098,
+          "p99_bucket_le": 0.01
+        }
+      }
+    },
+    {
+      "name": "create",
+      "seconds": 320.6,
+      "reconcile_time": {
+        "count": 42776,
+        "p50_s": 0.0037,
+        "p99_s": 2.2251,
+        "p99_bucket_le": 2.5
+      },
+      "queue_wait": {
+        "count": 42776,
+        "p50_s": 0.0082,
+        "p99_s": 777.2083,
+        "p99_bucket_le": 1000
+      },
+      "pool_reconcile_time": {
+        "count": 41432,
+        "p50_s": 0.0027,
+        "p99_s": 0.6139,
+        "p99_bucket_le": 0.7
+      },
+      "reconcile_errors": 0,
+      "create_to_ready": {
+        "count": 19000,
+        "p50_s": 0.274,
+        "p99_s": 114.5939
+      },
+      "api_requests": {
+        "GET pods": {
+          "count": 157,
+          "p50_s": 0.0532,
+          "p99_s": 0.8575,
+          "p99_bucket_le": 1
+        },
+        "PATCH pods": {
+          "count": 19141,
+          "p50_s": 0.0169,
+          "p99_s": 1.2843,
+          "p99_bucket_le": 2.5
+        },
+        "PATCH postgresinstances": {
+          "count": 19040,
+          "p50_s": 0.0115,
+          "p99_s": 0.8794,
+          "p99_bucket_le": 1
+        },
+        "PATCH postgresinstances/status": {
+          "count": 23770,
+          "p50_s": 0.0025,
+          "p99_s": 0.9962,
+          "p99_bucket_le": 1
+        },
+        "PATCH warmpools/status": {
+          "count": 2253,
+          "p50_s": 0.028,
+          "p99_s": 0.9779,
+          "p99_bucket_le": 1
+        },
+        "POST pods": {
+          "count": 19000,
+          "p50_s": 0.0112,
+          "p99_s": 0.9016,
+          "p99_bucket_le": 1
+        },
+        "POST services": {
+          "count": 19025,
+          "p50_s": 0.008,
+          "p99_s": 0.765,
+          "p99_bucket_le": 1
+        }
+      }
+    },
+    {
+      "name": "restart-resync",
+      "seconds": 3,
+      "reconcile_time": {
+        "count": 19000,
+        "p50_s": 0.0025,
+        "p99_s": 0.005,
+        "p99_bucket_le": 0.005
+      },
+      "queue_wait": {
+        "count": 19000,
+        "p50_s": 5.5,
+        "p99_s": 9.91,
+        "p99_bucket_le": 10
+      },
+      "pool_reconcile_time": {
+        "count": 10,
+        "p50_s": 0.0069,
+        "p99_s": 0.0099,
+        "p99_bucket_le": 0.01
+      },
+      "reconcile_errors": 0,
+      "create_to_ready": {
+        "count": 0,
+        "p50_s": 0,
+        "p99_s": 0
+      },
+      "api_requests": {
+        "GET other": {
+          "count": 2,
+          "p50_s": 0.001,
+          "p99_s": 0.0099,
+          "p99_bucket_le": 0.01
+        },
+        "GET secrets": {
+          "count": 10,
+          "p50_s": 0.0023,
+          "p99_s": 0.0049,
+          "p99_bucket_le": 0.005
+        }
+      }
+    },
+    {
+      "name": "delete",
+      "seconds": 316.9,
+      "reconcile_time": {
+        "count": 105881,
+        "p50_s": 0.0046,
+        "p99_s": 1.1848,
+        "p99_bucket_le": 1.25
+      },
+      "queue_wait": {
+        "count": 105881,
+        "p50_s": 0.2286,
+        "p99_s": 9.6027,
+        "p99_bucket_le": 10
+      },
+      "pool_reconcile_time": {
+        "count": 0,
+        "p50_s": 0,
+        "p99_s": 0
+      },
+      "reconcile_errors": 0,
+      "create_to_ready": {
+        "count": 0,
+        "p50_s": 0,
+        "p99_s": 0
+      },
+      "api_requests": {
+        "DELETE pods": {
+          "count": 19000,
+          "p50_s": 0.061,
+          "p99_s": 0.8122,
+          "p99_bucket_le": 1
+        },
+        "DELETE secrets": {
+          "count": 29250,
+          "p50_s": 0.016,
+          "p99_s": 0.4594,
+          "p99_bucket_le": 0.5
+        },
+        "DELETE services": {
+          "count": 29250,
+          "p50_s": 0.0336,
+          "p99_s": 0.7038,
+          "p99_bucket_le": 1
+        },
+        "PATCH postgresinstances": {
+          "count": 29250,
+          "p50_s": 0.0352,
+          "p99_s": 1.2485,
+          "p99_bucket_le": 2.5
+        }
+      }
+    }
+  ]
+}

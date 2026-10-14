@@ -40,7 +40,7 @@ spec:
       containers:
         - name: manager
           image: ghcr.io/adarsh-sgh/pgfleet:latest
-          args: [--leader-elect, --shards=4, --workers-per-shard=8]
+          args: [--leader-elect]
           ports:
             - {name: metrics, containerPort: 8080}
           readinessProbe:
