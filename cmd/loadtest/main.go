@@ -26,6 +26,7 @@ import (
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -150,7 +151,7 @@ func main() {
 			Spec:       pgv1.PostgresInstanceSpec{Resources: compute, PoolRef: "pool"},
 		}
 		created.Store(ns+"/"+n, time.Now())
-		check(c.Create(ctx, in))
+		check(retry(func() error { return client.IgnoreAlreadyExists(c.Create(ctx, in)) }))
 	})
 	fmt.Fprintf(os.Stderr, "created %d instances in %s\n", *instances, time.Since(t0).Round(time.Second))
 	// The watch gives per-instance latency; completion is checked by listing, so an event lost
@@ -187,7 +188,9 @@ func main() {
 	t0 = time.Now()
 	paced(*instances, func(i int) {
 		ns, n := name(i)
-		check(client.IgnoreNotFound(c.Delete(ctx, &pgv1.PostgresInstance{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: n}})))
+		check(retry(func() error {
+			return client.IgnoreNotFound(c.Delete(ctx, &pgv1.PostgresInstance{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: n}}))
+		}))
 	})
 	waitFor("instances deleted", func() bool {
 		list := &metav1.PartialObjectMetadataList{}
@@ -311,6 +314,21 @@ func listAll(ctx context.Context, c client.Client, l client.ObjectList, f func(c
 
 func isInstanceController(m *dto.Metric) bool {
 	return strings.HasPrefix(labelValue(m, "controller")+labelValue(m, "name"), "postgresinstance-")
+}
+
+// retry absorbs transient apiserver errors (timeouts, 429/5xx) so one slow request does not
+// abort a run; each retry is logged.
+func retry(f func() error) error {
+	var err error
+	for i := range 5 {
+		if err = f(); err == nil || !(apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) ||
+			apierrors.IsTooManyRequests(err) || apierrors.IsInternalError(err) || apierrors.IsServiceUnavailable(err)) {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "retry %d: %v\n", i+1, err)
+		time.Sleep(time.Second << i)
+	}
+	return err
 }
 
 // paced runs f(0..n-1) at *rate per second over 64 workers.

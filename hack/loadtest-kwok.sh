@@ -16,6 +16,9 @@ NAMESPACES=${NAMESPACES:-10}
 POOL=${POOL:-100}            # warm pods per namespace; total pods = INSTANCES + NAMESPACES*POOL
 NODES=${NODES:-25}
 RATE=${RATE:-200}
+# On macOS Go's fsync is F_FULLFSYNC; under this write load etcd stalled long enough for requests
+# to time out (results/history/loadtest-etcd-fsync-timeouts.txt). ETCD_FSYNC=true keeps it on.
+ETCD_FSYNC=${ETCD_FSYNC:-false}
 # MANAGER_FLAGS: extra operator flags, e.g. -cluster-ip-services
 LABEL=${LABEL:-shards${SHARDS}-w${WORKERS}-qps${QPS}}
 export KUBECONFIG=$PWD/results/raw/kwok.kubeconfig
@@ -29,7 +32,8 @@ if [ "$RUNTIME" = binary ] && [ -x bin/k8s/kube-apiserver ]; then # from hack/bu
     --etcd-binary "$PWD/bin/k8s/etcd")
 fi
 kwokctl create cluster --name "$CLUSTER" --runtime "$RUNTIME" --kubeconfig "$KUBECONFIG" --disable-qps-limits ${BINS[@]+"${BINS[@]}"} \
-  --extra-args kube-apiserver=service-cluster-ip-range=10.0.0.0/16
+  --extra-args kube-apiserver=service-cluster-ip-range=10.0.0.0/16 \
+  $([ "$ETCD_FSYNC" = true ] || echo --extra-args etcd=unsafe-no-fsync=true)
 cleanup() {
   if [ "$RUNTIME" = docker ]; then # record component restarts/OOM kills, then a memory snapshot
     docker inspect -f '{{.Name}} restarts={{.RestartCount}} oomkilled={{.State.OOMKilled}}' \

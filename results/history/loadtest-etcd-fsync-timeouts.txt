@@ -1,0 +1,10 @@
+# Run at 1fc9a68 (indexed cache), RATE=50, etcd with fsync on macOS. The load generator died on an etcd timeout;
+# operator log error summary follows the generator output.
+ready watch closed, re-watching
+created 19000 instances in 6m22s
+etcdserver: request timed out
+etcdserver: request timed out
+exit status 1
+--- operator errors
+  14 "error":"Timeout: request did not complete within requested timeout - context deadline exceeded
+   2 "error":"etcdserver: request timed out
