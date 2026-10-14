@@ -58,8 +58,41 @@ func CacheOptions() cache.Options {
 	}}
 }
 
+// Cache indexes. Label-selector Lists against the cache scan and deep-copy every object in the
+// namespace; at 2k pods per namespace that was a third of the operator's CPU.
+const (
+	idxInstance = "pgfleet.instance"  // pods and PVCs by instance
+	idxWarmPool = "pgfleet.warm-pool" // unclaimed pods by pool
+)
+
+func byLabel(key string) client.IndexerFunc {
+	return func(o client.Object) []string {
+		if v := o.GetLabels()[key]; v != "" {
+			return []string{v}
+		}
+		return nil
+	}
+}
+
 func Setup(mgr ctrl.Manager, o Options) error {
 	o.Shards, o.WorkersPerShard, o.PoolWorkers = max(o.Shards, 1), max(o.WorkersPerShard, 1), max(o.PoolWorkers, 1)
+	ctx, idx := context.Background(), mgr.GetFieldIndexer()
+	warm := func(o client.Object) []string {
+		if o.GetLabels()[LabelState] != StateWarm {
+			return nil
+		}
+		return byLabel(LabelPool)(o)
+	}
+	for _, err := range []error{
+		idx.IndexField(ctx, &corev1.Pod{}, idxInstance, byLabel(LabelInstance)),
+		idx.IndexField(ctx, &corev1.PersistentVolumeClaim{}, idxInstance, byLabel(LabelInstance)),
+		idx.IndexField(ctx, &corev1.Pod{}, idxWarmPool, warm),
+	} {
+		if err != nil {
+			return err
+		}
+	}
+	expect := &poolExpectations{}
 	for i := range o.Shards {
 		owns := func(ns, name string) bool { return ShardOf(ns, name, o.Shards) == i }
 		child := handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
@@ -69,7 +102,8 @@ func Setup(mgr ctrl.Manager, o Options) error {
 			}
 			return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: name}}}
 		})
-		r := &InstanceReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Creds: o.Creds, Step: o.Step, ClusterIPServices: o.ClusterIP}
+		r := &InstanceReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Creds: o.Creds, Step: o.Step,
+			ClusterIPServices: o.ClusterIP, PoolExpect: expect}
 		err := ctrl.NewControllerManagedBy(mgr).
 			Named(fmt.Sprintf("postgresinstance-%d", i)).
 			For(&pgv1.PostgresInstance{}, builder.WithPredicates(
@@ -92,7 +126,7 @@ func Setup(mgr ctrl.Manager, o Options) error {
 		// Owner handler enqueues the old owner too, so a claim (owner moves to the instance) refills.
 		Owns(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: o.PoolWorkers}).
-		Complete(&WarmPoolReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader()})
+		Complete(&WarmPoolReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Expect: expect})
 }
 
 // ShardOf maps an instance to exactly one shard, which keeps the work queue's guarantee that one

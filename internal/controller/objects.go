@@ -20,6 +20,8 @@ const (
 	LabelPool     = "pgfleet.dev/pool"
 	LabelState    = "pgfleet.dev/state" // warm | claimed
 	LabelTemplate = "pgfleet.dev/template-hash"
+	// Set on claim in place of LabelPool, so a pool's label set only ever matches its warm pods.
+	LabelClaimedFrom = "pgfleet.dev/claimed-from"
 
 	StateWarm    = "warm"
 	StateClaimed = "claimed"

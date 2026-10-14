@@ -25,12 +25,46 @@ const createBatch = 50
 type WarmPoolReconciler struct {
 	client.Client
 	APIReader client.Reader
+	Expect    *poolExpectations
+	secrets   sync.Map // pool UID -> bootstrap secret known to exist
+}
 
-	// created tracks pods this process created that the cache has not shown yet, the same
-	// "expectations" trick the ReplicaSet controller uses to avoid double-creating on cache lag.
-	mu      sync.Mutex
-	created map[types.NamespacedName]map[string]time.Time
-	secrets sync.Map // pool UID -> bootstrap secret known to exist
+// poolExpectations tracks pods a pool created that the cache has not shown yet, the trick the
+// ReplicaSet controller uses to avoid double-creating on cache lag.
+type poolExpectations struct {
+	mu sync.Mutex
+	m  map[types.NamespacedName]map[string]time.Time
+}
+
+func (e *poolExpectations) expect(pool types.NamespacedName, pod string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.m == nil {
+		e.m = map[types.NamespacedName]map[string]time.Time{}
+	}
+	if e.m[pool] == nil {
+		e.m[pool] = map[string]time.Time{}
+	}
+	e.m[pool][pod] = time.Now()
+}
+
+func (e *poolExpectations) observe(pool types.NamespacedName, pod string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.m[pool], pod)
+}
+
+// pending drops expectations the cache has caught up with (or that are too old to trust) and
+// counts the rest.
+func (e *poolExpectations) pending(pool types.NamespacedName, seen map[string]bool) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for name, at := range e.m[pool] {
+		if seen[name] || time.Since(at) > 30*time.Second {
+			delete(e.m[pool], name)
+		}
+	}
+	return len(e.m[pool])
 }
 
 func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -49,9 +83,8 @@ func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	hash := tmpl.hash()
 
 	pods := &corev1.PodList{}
-	// Claimed pods keep the pool label; listing them too lets expectations clear for a pod that
-	// was claimed before the cache ever showed it warm.
-	if err := r.List(ctx, pods, client.InNamespace(pool.Namespace), client.MatchingLabels{LabelPool: pool.Name}); err != nil {
+	// Read-only: skip the per-pod deep copy, which was most of this reconcile's CPU.
+	if err := r.List(ctx, pods, client.InNamespace(pool.Namespace), client.MatchingFields{idxWarmPool: pool.Name}, client.UnsafeDisableDeepCopy); err != nil {
 		return ctrl.Result{}, err
 	}
 	seen := map[string]bool{}
@@ -60,7 +93,7 @@ func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		p := &pods.Items[i]
 		seen[p.Name] = true
 		switch {
-		case p.Labels[LabelState] != StateWarm, p.DeletionTimestamp != nil:
+		case p.DeletionTimestamp != nil:
 		case p.Labels[LabelTemplate] != hash:
 			// Spec changed: stale warm pods are replaced, claimed ones are left alone.
 			if err := r.Delete(ctx, p); client.IgnoreNotFound(err) != nil {
@@ -77,7 +110,7 @@ func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 		}
 	}
-	inflight := r.inflight(req.NamespacedName, seen)
+	inflight := r.Expect.pending(req.NamespacedName, seen)
 	have := len(ready) + len(warming) + inflight
 	want := int(pool.Spec.Size)
 
@@ -121,7 +154,7 @@ func (r *WarmPoolReconciler) createPods(ctx context.Context, pool *pgv1.WarmPool
 	var wg sync.WaitGroup
 	for range n {
 		name := pool.Name + "-" + utilrand.String(6)
-		r.expect(client.ObjectKeyFromObject(pool), name)
+		r.Expect.expect(client.ObjectKeyFromObject(pool), name)
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
@@ -135,7 +168,7 @@ func (r *WarmPoolReconciler) createPods(ctx context.Context, pool *pgv1.WarmPool
 			// reconcile, so a crash in between leaves a pending pod, not an orphaned volume.
 			pod := buildPod(name, pool.Namespace, t, pvc, secret, labels, ownerRef(pool, "WarmPool"))
 			if err := r.Create(ctx, pod); err != nil {
-				r.forget(client.ObjectKeyFromObject(pool), name)
+				r.Expect.observe(client.ObjectKeyFromObject(pool), name)
 				errs <- err
 				return
 			}
@@ -179,35 +212,4 @@ func (r *WarmPoolReconciler) ensureSecret(ctx context.Context, pool *pgv1.WarmPo
 		r.secrets.Store(pool.UID, true)
 	}
 	return name, err
-}
-
-func (r *WarmPoolReconciler) expect(pool types.NamespacedName, pod string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.created == nil {
-		r.created = map[types.NamespacedName]map[string]time.Time{}
-	}
-	if r.created[pool] == nil {
-		r.created[pool] = map[string]time.Time{}
-	}
-	r.created[pool][pod] = time.Now()
-}
-
-func (r *WarmPoolReconciler) forget(pool types.NamespacedName, pod string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.created[pool], pod)
-}
-
-// inflight drops expectations the cache has caught up with (or that are too old to trust) and
-// counts the rest.
-func (r *WarmPoolReconciler) inflight(pool types.NamespacedName, seen map[string]bool) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for name, at := range r.created[pool] {
-		if seen[name] || time.Since(at) > 30*time.Second {
-			delete(r.created[pool], name)
-		}
-	}
-	return len(r.created[pool])
 }

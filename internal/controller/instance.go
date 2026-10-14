@@ -37,6 +37,10 @@ type InstanceReconciler struct {
 	// ClusterIPServices gives each instance a virtual IP instead of a headless Service.
 	ClusterIPServices bool
 
+	// PoolExpect is shared with the pool controller: a claim settles the pool's expectation for
+	// a pod it created but never saw warm.
+	PoolExpect *poolExpectations
+
 	bound sync.Map // instance key -> pod name claimed/created by this process
 }
 
@@ -111,7 +115,7 @@ func (r *InstanceReconciler) converge(ctx context.Context, in *pgv1.PostgresInst
 	}
 	if st.Source == "" {
 		st.Source = pgv1.SourceCold
-		if pod.Labels[LabelPool] != "" {
+		if pod.Labels[LabelClaimedFrom] != "" {
 			st.Source = pgv1.SourceWarm
 		}
 	}
@@ -158,7 +162,7 @@ func (r *InstanceReconciler) converge(ctx context.Context, in *pgv1.PostgresInst
 func (r *InstanceReconciler) findPod(ctx context.Context, in *pgv1.PostgresInstance) (*corev1.Pod, error) {
 	key := client.ObjectKeyFromObject(in)
 	pods := &corev1.PodList{}
-	if err := r.List(ctx, pods, client.InNamespace(in.Namespace), client.MatchingLabels{LabelInstance: in.Name}); err != nil {
+	if err := r.List(ctx, pods, client.InNamespace(in.Namespace), client.MatchingFields{idxInstance: in.Name}); err != nil {
 		return nil, err
 	}
 	for i := range pods.Items {
@@ -203,26 +207,27 @@ func (r *InstanceReconciler) claim(ctx context.Context, in *pgv1.PostgresInstanc
 		return nil, nil
 	}
 	pods := &corev1.PodList{}
-	if err := r.List(ctx, pods, client.InNamespace(in.Namespace), client.MatchingLabels{
-		LabelPool: pool.Name, LabelState: StateWarm, LabelTemplate: poolTemplate(pool).hash(),
-	}); err != nil {
+	if err := r.List(ctx, pods, client.InNamespace(in.Namespace), client.MatchingFields{idxWarmPool: pool.Name}, client.UnsafeDisableDeepCopy); err != nil {
 		return nil, err
 	}
+	hash := poolTemplate(pool).hash()
 	var ready []*corev1.Pod
 	for i := range pods.Items {
-		if podReady(&pods.Items[i]) {
-			ready = append(ready, &pods.Items[i])
+		if p := &pods.Items[i]; p.Labels[LabelTemplate] == hash && podReady(p) {
+			ready = append(ready, p)
 		}
 	}
 	// Random order spreads concurrent claimers over different pods instead of all CAS-ing the first.
 	rand.Shuffle(len(ready), func(i, j int) { ready[i], ready[j] = ready[j], ready[i] })
-	for _, p := range ready[:min(len(ready), 5)] {
+	for _, cached := range ready[:min(len(ready), 5)] {
+		p := cached.DeepCopy() // list skipped the copy; never mutate the cache's object
 		ok, err := r.tryClaim(ctx, in, p)
 		if err != nil {
 			return nil, err
 		}
 		if ok {
 			r.bound.Store(client.ObjectKeyFromObject(in), p.Name)
+			r.PoolExpect.observe(types.NamespacedName{Namespace: in.Namespace, Name: pool.Name}, p.Name)
 			claims.WithLabelValues("warm").Inc()
 			return p, r.step(ctx, "claimed")
 		}
@@ -237,6 +242,9 @@ func (r *InstanceReconciler) claim(ctx context.Context, in *pgv1.PostgresInstanc
 func (r *InstanceReconciler) tryClaim(ctx context.Context, in *pgv1.PostgresInstance, p *corev1.Pod) (bool, error) {
 	for attempt := 0; ; attempt++ {
 		patch := client.MergeFromWithOptions(p.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		p.Labels[LabelClaimedFrom] = p.Labels[LabelPool]
+		delete(p.Labels, LabelPool)
+		delete(p.Labels, LabelTemplate)
 		p.Labels[LabelState] = StateClaimed
 		p.Labels[LabelInstance] = in.Name
 		p.OwnerReferences = []metav1.OwnerReference{ownerRef(in, "PostgresInstance")}
@@ -314,7 +322,7 @@ func (r *InstanceReconciler) createCold(ctx context.Context, in *pgv1.PostgresIn
 
 func (r *InstanceReconciler) instancePVC(ctx context.Context, in *pgv1.PostgresInstance) (string, error) {
 	pvcs := &corev1.PersistentVolumeClaimList{}
-	if err := r.List(ctx, pvcs, client.InNamespace(in.Namespace), client.MatchingLabels{LabelInstance: in.Name}); err != nil {
+	if err := r.List(ctx, pvcs, client.InNamespace(in.Namespace), client.MatchingFields{idxInstance: in.Name}); err != nil {
 		return "", err
 	}
 	for _, p := range pvcs.Items {
@@ -516,7 +524,7 @@ func (r *InstanceReconciler) finalize(ctx context.Context, in *pgv1.PostgresInst
 	// confirmed against the apiserver, once, so teardown of thousands of instances does not
 	// turn into thousands of uncached LISTs per second.
 	pods := &corev1.PodList{}
-	if err := r.List(ctx, pods, sel...); err != nil {
+	if err := r.List(ctx, pods, client.InNamespace(in.Namespace), client.MatchingFields{idxInstance: in.Name}); err != nil {
 		return ctrl.Result{}, err
 	}
 	if len(pods.Items) == 0 {

@@ -20,6 +20,7 @@ import (
 func main() {
 	var (
 		metricsAddr, probeAddr string
+		pprofAddr              string
 		leaderElect, rotate    bool
 		opts                   controller.Options
 		qps                    float64
@@ -27,6 +28,7 @@ func main() {
 	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "")
+	flag.StringVar(&pprofAddr, "pprof-bind-address", "", "serve net/http/pprof here, e.g. :6060")
 	flag.BoolVar(&leaderElect, "leader-elect", false, "")
 	flag.BoolVar(&rotate, "rotate-credentials", true, "replace the pool password on claimed pods (needs pods/exec)")
 	flag.BoolVar(&opts.ClusterIP, "cluster-ip-services", false, "give each instance a ClusterIP Service instead of a headless one")
@@ -53,6 +55,7 @@ func main() {
 		Cache:                  controller.CacheOptions(),
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
+		PprofBindAddress:       pprofAddr,
 		LeaderElection:         leaderElect,
 		LeaderElectionID:       "pgfleet.dev",
 	})
