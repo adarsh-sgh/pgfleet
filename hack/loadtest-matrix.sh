@@ -2,7 +2,8 @@
 # Every configuration in the README's load-test table, one fresh kwok cluster each.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-run() { # label shards workers rate instances [extra operator flags]
+run() { # label shards workers rate instances [extra operator flags]; skips rows already measured
+  [ -f "results/loadtest-$1.json" ] && return
   LABEL=$1 SHARDS=$2 WORKERS=$3 RATE=$4 INSTANCES=$5 MANAGER_FLAGS=${6:-} ./hack/loadtest-kwok.sh >"results/raw/run-$1.out" 2>&1
   echo "done $1"
 }

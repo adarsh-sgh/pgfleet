@@ -61,5 +61,5 @@ ${CAFFEINATE[@]+"${CAFFEINATE[@]}"} ./bin/loadtest -manager ./bin/manager -manag
   -out "results/loadtest-$LABEL.json"
 if command -v pmset >/dev/null; then
   pmset -g log | awk -v s="$START" '($1" "$2) >= s && /Entering Sleep/' >"results/raw/sleep-$LABEL.txt"
-  [ -s "results/raw/sleep-$LABEL.txt" ] && echo "WARNING: machine slept during $LABEL, see results/raw/sleep-$LABEL.txt" >&2
+  if [ -s "results/raw/sleep-$LABEL.txt" ]; then echo "WARNING: machine slept during $LABEL" >&2; fi
 fi
