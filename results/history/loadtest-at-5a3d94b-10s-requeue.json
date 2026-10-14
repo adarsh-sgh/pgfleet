@@ -1,0 +1,259 @@
+{
+  "label": "shards4-w8-r200",
+  "manager_args": "-metrics-bind-address :19080 -health-probe-bind-address :19081 -rotate-credentials=false     -shards 4 -workers-per-shard 8 -kube-api-qps 2000 -kube-api-burst 4000 ",
+  "instances": 19000,
+  "pods_at_peak": 20000,
+  "pods_running_ready_at_peak": 20000,
+  "nodes": 25,
+  "pod_source": {
+    "cold": 1278,
+    "conflict": 549,
+    "pool_empty": 1278,
+    "warm": 17722
+  },
+  "phases": [
+    {
+      "name": "pools",
+      "seconds": 3.2,
+      "reconcile_time": {
+        "count": 0,
+        "p50_s": 0,
+        "p99_s": 0
+      },
+      "queue_wait": {
+        "count": 0,
+        "p50_s": 0,
+        "p99_s": 0
+      },
+      "pool_reconcile_time": {
+        "count": 905,
+        "p50_s": 0.0062,
+        "p99_s": 0.0865,
+        "p99_bucket_le": 0.1
+      },
+      "reconcile_errors": 0,
+      "create_to_ready": {
+        "count": 0,
+        "p50_s": 0,
+        "p99_s": 0
+      },
+      "api_requests": {
+        "GET secrets": {
+          "count": 10,
+          "p50_s": 0.003,
+          "p99_s": 0.0095,
+          "p99_bucket_le": 0.01
+        },
+        "PATCH warmpools/status": {
+          "count": 711,
+          "p50_s": 0.007,
+          "p99_s": 0.0233,
+          "p99_bucket_le": 0.025
+        },
+        "POST pods": {
+          "count": 1000,
+          "p50_s": 0.0091,
+          "p99_s": 0.0875,
+          "p99_bucket_le": 0.1
+        },
+        "POST secrets": {
+          "count": 10,
+          "p50_s": 0.0075,
+          "p99_s": 0.0235,
+          "p99_bucket_le": 0.025
+        }
+      }
+    },
+    {
+      "name": "create",
+      "seconds": 228.7,
+      "reconcile_time": {
+        "count": 47080,
+        "p50_s": 0.0137,
+        "p99_s": 1.8497,
+        "p99_bucket_le": 2
+      },
+      "queue_wait": {
+        "count": 47080,
+        "p50_s": 0.0379,
+        "p99_s": 356.0486,
+        "p99_bucket_le": 1000
+      },
+      "pool_reconcile_time": {
+        "count": 12960,
+        "p50_s": 0.0203,
+        "p99_s": 0.9015,
+        "p99_bucket_le": 1
+      },
+      "reconcile_errors": 0,
+      "create_to_ready": {
+        "count": 19000,
+        "p50_s": 0.0833,
+        "p99_s": 123.8887
+      },
+      "api_requests": {
+        "GET pods": {
+          "count": 608,
+          "p50_s": 0.0541,
+          "p99_s": 0.8186,
+          "p99_bucket_le": 1
+        },
+        "GET secrets": {
+          "count": 1278,
+          "p50_s": 0.0532,
+          "p99_s": 0.7689,
+          "p99_bucket_le": 1
+        },
+        "PATCH pods": {
+          "count": 18271,
+          "p50_s": 0.0181,
+          "p99_s": 0.7737,
+          "p99_bucket_le": 1
+        },
+        "PATCH postgresinstances": {
+          "count": 19009,
+          "p50_s": 0.0165,
+          "p99_s": 0.5112,
+          "p99_bucket_le": 1
+        },
+        "PATCH postgresinstances/status": {
+          "count": 28533,
+          "p50_s": 0.0134,
+          "p99_s": 0.682,
+          "p99_bucket_le": 1
+        },
+        "PATCH warmpools/status": {
+          "count": 8261,
+          "p50_s": 0.0092,
+          "p99_s": 0.4337,
+          "p99_bucket_le": 0.5
+        },
+        "POST pods": {
+          "count": 19000,
+          "p50_s": 0.0178,
+          "p99_s": 0.5324,
+          "p99_bucket_le": 1
+        },
+        "POST secrets": {
+          "count": 1278,
+          "p50_s": 0.0636,
+          "p99_s": 0.8459,
+          "p99_bucket_le": 1
+        },
+        "POST services": {
+          "count": 19015,
+          "p50_s": 0.0146,
+          "p99_s": 0.4508,
+          "p99_bucket_le": 0.5
+        }
+      }
+    },
+    {
+      "name": "restart-resync",
+      "seconds": 3,
+      "reconcile_time": {
+        "count": 19000,
+        "p50_s": 0.0025,
+        "p99_s": 0.005,
+        "p99_bucket_le": 0.005
+      },
+      "queue_wait": {
+        "count": 19000,
+        "p50_s": 2.6842,
+        "p99_s": 9.8537,
+        "p99_bucket_le": 10
+      },
+      "pool_reconcile_time": {
+        "count": 10,
+        "p50_s": 0.0225,
+        "p99_s": 0.0494,
+        "p99_bucket_le": 0.05
+      },
+      "reconcile_errors": 0,
+      "create_to_ready": {
+        "count": 0,
+        "p50_s": 0,
+        "p99_s": 0
+      },
+      "api_requests": {
+        "GET other": {
+          "count": 2,
+          "p50_s": 0.001,
+          "p99_s": 0.0049,
+          "p99_bucket_le": 0.005
+        },
+        "GET secrets": {
+          "count": 10,
+          "p50_s": 0.0031,
+          "p99_s": 0.0098,
+          "p99_bucket_le": 0.01
+        }
+      }
+    },
+    {
+      "name": "delete",
+      "seconds": 508.9,
+      "reconcile_time": {
+        "count": 398442,
+        "p50_s": 0.003,
+        "p99_s": 0.6704,
+        "p99_bucket_le": 0.7
+      },
+      "queue_wait": {
+        "count": 398442,
+        "p50_s": 0.1919,
+        "p99_s": 93.4283,
+        "p99_bucket_le": 100
+      },
+      "pool_reconcile_time": {
+        "count": 0,
+        "p50_s": 0,
+        "p99_s": 0
+      },
+      "reconcile_errors": 0,
+      "create_to_ready": {
+        "count": 0,
+        "p50_s": 0,
+        "p99_s": 0
+      },
+      "api_requests": {
+        "DELETE pods": {
+          "count": 19000,
+          "p50_s": 0.0496,
+          "p99_s": 0.9253,
+          "p99_bucket_le": 1
+        },
+        "DELETE secrets": {
+          "count": 1278,
+          "p50_s": 0.0212,
+          "p99_s": 0.1764,
+          "p99_bucket_le": 0.25
+        },
+        "DELETE services": {
+          "count": 27286,
+          "p50_s": 0.042,
+          "p99_s": 0.4844,
+          "p99_bucket_le": 0.5
+        },
+        "GET pods": {
+          "count": 27286,
+          "p50_s": 0.0241,
+          "p99_s": 1.4379,
+          "p99_bucket_le": 2.5
+        },
+        "GET secrets": {
+          "count": 27286,
+          "p50_s": 0.0126,
+          "p99_s": 0.2498,
+          "p99_bucket_le": 0.25
+        },
+        "PATCH postgresinstances": {
+          "count": 27286,
+          "p50_s": 0.0299,
+          "p99_s": 1.0008,
+          "p99_bucket_le": 2.5
+        }
+      }
+    }
+  ]
+}
