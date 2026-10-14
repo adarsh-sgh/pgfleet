@@ -49,8 +49,17 @@ kwokctl scale node --name "$CLUSTER" --replicas "$NODES" \
 kubectl apply -f config/crd >/dev/null
 
 go build -o bin/manager ./cmd/manager
-go run ./cmd/loadtest -manager ./bin/manager -manager-log "results/raw/manager-$LABEL.log" \
+go build -o bin/loadtest ./cmd/loadtest
+START=$(date '+%Y-%m-%d %H:%M:%S')
+# A laptop that sleeps mid-run freezes every process and breaks timeouts; keep it awake and
+# record any sleep that happened anyway, so a tainted run can be discarded.
+CAFFEINATE=(); command -v caffeinate >/dev/null && CAFFEINATE=(caffeinate -ims)
+${CAFFEINATE[@]+"${CAFFEINATE[@]}"} ./bin/loadtest -manager ./bin/manager -manager-log "results/raw/manager-$LABEL.log" \
   -manager-args "-metrics-bind-address :19080 -health-probe-bind-address :19081 -rotate-credentials=false \
     -shards $SHARDS -workers-per-shard $WORKERS -kube-api-qps $QPS -kube-api-burst $((QPS * 2)) ${MANAGER_FLAGS:-}" \
   -instances "$INSTANCES" -namespaces "$NAMESPACES" -pool-size "$POOL" -rate "$RATE" -label "$LABEL" \
   -out "results/loadtest-$LABEL.json"
+if command -v pmset >/dev/null; then
+  pmset -g log | awk -v s="$START" '($1" "$2) >= s && /Entering Sleep/' >"results/raw/sleep-$LABEL.txt"
+  [ -s "results/raw/sleep-$LABEL.txt" ] && echo "WARNING: machine slept during $LABEL, see results/raw/sleep-$LABEL.txt" >&2
+fi
