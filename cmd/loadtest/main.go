@@ -130,27 +130,19 @@ func main() {
 	var readyLat []float64
 	var mu sync.Mutex
 	watchCtx, stopWatch := context.WithCancel(ctx)
-	w, err := c.Watch(watchCtx, &pgv1.PostgresInstanceList{})
-	check(err)
 	readyCount := atomic.Int64{}
 	seen := sync.Map{}
-	go func() {
-		for ev := range w.ResultChan() {
-			in, ok := ev.Object.(*pgv1.PostgresInstance)
-			if !ok || !meta.IsStatusConditionTrue(in.Status.Conditions, pgv1.CondReady) {
-				continue
-			}
-			key := in.Namespace + "/" + in.Name
-			start, ok := created.Load(key)
-			if _, dup := seen.LoadOrStore(key, true); !ok || dup {
-				continue
-			}
-			mu.Lock()
-			readyLat = append(readyLat, time.Since(start.(time.Time)).Seconds())
-			mu.Unlock()
-			readyCount.Add(1)
+	go watchReady(watchCtx, c, func(in *pgv1.PostgresInstance) {
+		key := in.Namespace + "/" + in.Name
+		start, ok := created.Load(key)
+		if _, dup := seen.LoadOrStore(key, true); !ok || dup {
+			return
 		}
-	}()
+		mu.Lock()
+		readyLat = append(readyLat, time.Since(start.(time.Time)).Seconds())
+		mu.Unlock()
+		readyCount.Add(1)
+	})
 	paced(*instances, func(i int) {
 		ns, n := name(i)
 		in := &pgv1.PostgresInstance{
@@ -161,7 +153,22 @@ func main() {
 		check(c.Create(ctx, in))
 	})
 	fmt.Fprintf(os.Stderr, "created %d instances in %s\n", *instances, time.Since(t0).Round(time.Second))
-	waitFor("instances ready", func() bool { return readyCount.Load() >= int64(*instances) })
+	// The watch gives per-instance latency; completion is checked by listing, so an event lost
+	// across a watch reconnect cannot stall the run (it only shrinks the latency sample).
+	waitFor("instances ready", func() bool {
+		if readyCount.Load() >= int64(*instances) {
+			return true
+		}
+		list := &pgv1.PostgresInstanceList{}
+		check(c.List(ctx, list))
+		ready := 0
+		for _, in := range list.Items {
+			if meta.IsStatusConditionTrue(in.Status.Conditions, pgv1.CondReady) {
+				ready++
+			}
+		}
+		return ready >= *instances
+	})
 	stopWatch()
 	p := diff("create", time.Since(t0), before, scrape())
 	p.EndToEnd = sampleQuantiles(readyLat)
@@ -207,6 +214,34 @@ func main() {
 	fmt.Println(string(b))
 	if *out != "" {
 		check(os.WriteFile(*out, b, 0o644))
+	}
+}
+
+// watchReady calls f for every Ready instance event, re-watching from the last seen
+// resourceVersion whenever the apiserver closes the stream.
+func watchReady(ctx context.Context, c client.WithWatch, f func(*pgv1.PostgresInstance)) {
+	rv := ""
+	for ctx.Err() == nil {
+		w, err := c.Watch(ctx, &pgv1.PostgresInstanceList{}, &client.ListOptions{Raw: &metav1.ListOptions{ResourceVersion: rv}})
+		if err != nil {
+			time.Sleep(time.Second)
+			continue
+		}
+		for ev := range w.ResultChan() {
+			in, ok := ev.Object.(*pgv1.PostgresInstance)
+			if !ok {
+				rv = "" // 410 Gone or similar: resume from now
+				break
+			}
+			rv = in.ResourceVersion
+			if meta.IsStatusConditionTrue(in.Status.Conditions, pgv1.CondReady) {
+				f(in)
+			}
+		}
+		w.Stop()
+		if ctx.Err() == nil {
+			fmt.Fprintln(os.Stderr, "ready watch closed, re-watching")
+		}
 	}
 }
 

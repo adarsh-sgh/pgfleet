@@ -10,12 +10,13 @@ CLUSTER=${CLUSTER:-pgfleet-load}
 RUNTIME=${RUNTIME:-binary}
 SHARDS=${SHARDS:-4}
 WORKERS=${WORKERS:-8}        # per shard
-QPS=${QPS:-200}
+QPS=${QPS:-2000}
 INSTANCES=${INSTANCES:-19000}
 NAMESPACES=${NAMESPACES:-10}
 POOL=${POOL:-100}            # warm pods per namespace; total pods = INSTANCES + NAMESPACES*POOL
 NODES=${NODES:-25}
 RATE=${RATE:-200}
+# MANAGER_FLAGS: extra operator flags, e.g. -cluster-ip-services
 LABEL=${LABEL:-shards${SHARDS}-w${WORKERS}-qps${QPS}}
 export KUBECONFIG=$PWD/results/raw/kwok.kubeconfig
 mkdir -p results/raw
@@ -32,6 +33,6 @@ kubectl apply -f config/crd >/dev/null
 go build -o bin/manager ./cmd/manager
 go run ./cmd/loadtest -manager ./bin/manager -manager-log "results/raw/manager-$LABEL.log" \
   -manager-args "-metrics-bind-address :19080 -health-probe-bind-address :19081 -rotate-credentials=false \
-    -shards $SHARDS -workers-per-shard $WORKERS -kube-api-qps $QPS -kube-api-burst $((QPS * 2))" \
+    -shards $SHARDS -workers-per-shard $WORKERS -kube-api-qps $QPS -kube-api-burst $((QPS * 2)) ${MANAGER_FLAGS:-}" \
   -instances "$INSTANCES" -namespaces "$NAMESPACES" -pool-size "$POOL" -rate "$RATE" -label "$LABEL" \
   -out "results/loadtest-$LABEL.json"

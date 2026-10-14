@@ -43,6 +43,7 @@ type Options struct {
 	WorkersPerShard int
 	PoolWorkers     int
 	Creds           CredentialSetter
+	ClusterIP       bool // ClusterIP instead of headless Services
 	Step            func(ctx context.Context, step string) error
 }
 
@@ -68,7 +69,7 @@ func Setup(mgr ctrl.Manager, o Options) error {
 			}
 			return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: name}}}
 		})
-		r := &InstanceReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Creds: o.Creds, Step: o.Step}
+		r := &InstanceReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Creds: o.Creds, Step: o.Step, ClusterIPServices: o.ClusterIP}
 		err := ctrl.NewControllerManagedBy(mgr).
 			Named(fmt.Sprintf("postgresinstance-%d", i)).
 			For(&pgv1.PostgresInstance{}, builder.WithPredicates(

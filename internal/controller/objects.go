@@ -102,18 +102,23 @@ func buildPVC(name, ns string, t template, labels map[string]string, owner metav
 	}
 }
 
-func buildService(in *pgv1.PostgresInstance, owner metav1.OwnerReference) *corev1.Service {
-	return &corev1.Service{
+func buildService(in *pgv1.PostgresInstance, owner metav1.OwnerReference, clusterIP bool) *corev1.Service {
+	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: in.Name, Namespace: in.Namespace,
 			Labels: withManaged(map[string]string{LabelInstance: in.Name}), OwnerReferences: []metav1.OwnerReference{owner}},
-		// Headless: DNS resolves straight to the pod. A ClusterIP per instance cost ~200ms of IP
-		// allocation per create in the load test and a kube-proxy rule set per instance on every node.
 		Spec: corev1.ServiceSpec{
+			// Headless by default: DNS resolves straight to the pod. A ClusterIP per instance cost
+			// ~200ms of IP allocation per create in the load test, plus a kube-proxy rule set per
+			// instance on every node.
 			ClusterIP: corev1.ClusterIPNone,
 			Selector:  map[string]string{LabelInstance: in.Name},
 			Ports:     []corev1.ServicePort{{Name: "postgres", Port: 5432, TargetPort: intstr.FromInt32(5432)}},
 		},
 	}
+	if clusterIP {
+		svc.Spec.ClusterIP = ""
+	}
+	return svc
 }
 
 func buildSecret(name, ns string, labels map[string]string, owner metav1.OwnerReference) *corev1.Secret {

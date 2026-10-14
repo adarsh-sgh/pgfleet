@@ -33,6 +33,8 @@ type InstanceReconciler struct {
 	Creds CredentialSetter
 	// Step, if set, runs after each side effect; tests use it to kill the reconciler mid-flight.
 	Step func(ctx context.Context, step string) error
+	// ClusterIPServices gives each instance a virtual IP instead of a headless Service.
+	ClusterIPServices bool
 }
 
 // +kubebuilder:rbac:groups=pgfleet.dev,resources=postgresinstances;warmpools,verbs=get;list;watch;update;patch
@@ -329,7 +331,7 @@ func (r *InstanceReconciler) ensureService(ctx context.Context, in *pgv1.Postgre
 	if !apierrors.IsNotFound(err) {
 		return err
 	}
-	if err := r.Create(ctx, buildService(in, ownerRef(in, "PostgresInstance"))); err != nil && !apierrors.IsAlreadyExists(err) {
+	if err := r.Create(ctx, buildService(in, ownerRef(in, "PostgresInstance"), r.ClusterIPServices)); err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}
 	return r.step(ctx, "service")

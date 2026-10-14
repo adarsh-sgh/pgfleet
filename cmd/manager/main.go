@@ -29,6 +29,7 @@ func main() {
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "")
 	flag.BoolVar(&leaderElect, "leader-elect", false, "")
 	flag.BoolVar(&rotate, "rotate-credentials", true, "replace the pool password on claimed pods (needs pods/exec)")
+	flag.BoolVar(&opts.ClusterIP, "cluster-ip-services", false, "give each instance a ClusterIP Service instead of a headless one")
 	flag.IntVar(&opts.Shards, "shards", 4, "PostgresInstance work queues")
 	flag.IntVar(&opts.WorkersPerShard, "workers-per-shard", 8, "")
 	flag.IntVar(&opts.PoolWorkers, "pool-workers", 4, "")
