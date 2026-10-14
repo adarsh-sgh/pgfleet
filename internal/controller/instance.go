@@ -533,7 +533,9 @@ func (r *InstanceReconciler) finalize(ctx context.Context, in *pgv1.PostgresInst
 		}
 	}
 	if len(pods.Items) > 0 {
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.step(ctx, "pods-deleting")
+		// The pod's delete event requeues us; this is only a safety net. A 10s poll here made
+		// teardown of 19k instances cost ~21 reconciles each while kwok drained pods.
+		return ctrl.Result{RequeueAfter: 2 * time.Minute}, r.step(ctx, "pods-deleting")
 	}
 	retain := in.Spec.DeletionPolicy == pgv1.DeletionPolicyRetain
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: in.Namespace, Name: in.Name}}
