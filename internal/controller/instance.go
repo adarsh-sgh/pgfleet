@@ -488,17 +488,28 @@ func (r *InstanceReconciler) finalize(ctx context.Context, in *pgv1.PostgresInst
 		return ctrl.Result{}, nil
 	}
 	sel := []client.ListOption{client.InNamespace(in.Namespace), client.MatchingLabels{LabelInstance: in.Name}}
+	// Wait for pods from the cache (their delete events requeue us). Only an empty cache is
+	// confirmed against the apiserver, once, so teardown of thousands of instances does not
+	// turn into thousands of uncached LISTs per second.
 	pods := &corev1.PodList{}
-	if err := r.APIReader.List(ctx, pods, sel...); err != nil {
+	if err := r.List(ctx, pods, sel...); err != nil {
 		return ctrl.Result{}, err
 	}
+	if len(pods.Items) == 0 {
+		if err := r.APIReader.List(ctx, pods, sel...); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 	for i := range pods.Items {
+		if pods.Items[i].DeletionTimestamp != nil {
+			continue
+		}
 		if err := r.Delete(ctx, &pods.Items[i]); client.IgnoreNotFound(err) != nil {
 			return ctrl.Result{}, err
 		}
 	}
 	if len(pods.Items) > 0 {
-		return ctrl.Result{RequeueAfter: time.Second}, r.step(ctx, "pods-deleting")
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.step(ctx, "pods-deleting")
 	}
 	retain := in.Spec.DeletionPolicy == pgv1.DeletionPolicyRetain
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: in.Namespace, Name: in.Name}}
