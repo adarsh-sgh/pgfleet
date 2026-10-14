@@ -519,17 +519,20 @@ func (r *InstanceReconciler) finalize(ctx context.Context, in *pgv1.PostgresInst
 	if !controllerutil.ContainsFinalizer(in, Finalizer) {
 		return ctrl.Result{}, nil
 	}
-	sel := []client.ListOption{client.InNamespace(in.Namespace), client.MatchingLabels{LabelInstance: in.Name}}
-	// Wait for pods from the cache (their delete events requeue us). Only an empty cache is
-	// confirmed against the apiserver, once, so teardown of thousands of instances does not
-	// turn into thousands of uncached LISTs per second.
+	// Pods come from the cache (their delete events requeue us) plus findPod's check for a bind
+	// this process made that the cache has not shown yet. An uncached LIST here was the slowest
+	// call of a 19k-instance teardown.
 	pods := &corev1.PodList{}
 	if err := r.List(ctx, pods, client.InNamespace(in.Namespace), client.MatchingFields{idxInstance: in.Name}); err != nil {
 		return ctrl.Result{}, err
 	}
 	if len(pods.Items) == 0 {
-		if err := r.APIReader.List(ctx, pods, sel...); err != nil {
+		p, err := r.findPod(ctx, in)
+		if err != nil {
 			return ctrl.Result{}, err
+		}
+		if p != nil {
+			pods.Items = append(pods.Items, *p)
 		}
 	}
 	for i := range pods.Items {
@@ -545,34 +548,28 @@ func (r *InstanceReconciler) finalize(ctx context.Context, in *pgv1.PostgresInst
 		// teardown of 19k instances cost ~21 reconciles each while kwok drained pods.
 		return ctrl.Result{RequeueAfter: 2 * time.Minute}, r.step(ctx, "pods-deleting")
 	}
-	retain := in.Spec.DeletionPolicy == pgv1.DeletionPolicyRetain
+
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: in.Namespace, Name: in.Name}}
 	if err := r.Delete(ctx, svc); client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, err
 	}
-	pvcs := &corev1.PersistentVolumeClaimList{}
+	children := []client.Object{&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: in.Namespace, Name: secretName(in)}}}
 	if in.Spec.Storage != nil { // storage cannot be added later, so ephemeral instances never own a volume
-		if err := r.APIReader.List(ctx, pvcs, sel...); err != nil {
+		// Uncached: with Retain, a volume the cache missed would keep its owner reference and be
+		// garbage-collected, data included.
+		pvcs := &corev1.PersistentVolumeClaimList{}
+		if err := r.APIReader.List(ctx, pvcs, client.InNamespace(in.Namespace), client.MatchingLabels{LabelInstance: in.Name}); err != nil {
 			return ctrl.Result{}, err
 		}
+		for i := range pvcs.Items {
+			children = append(children, &pvcs.Items[i])
+		}
 	}
-	secret := &corev1.Secret{}
-	if err := r.APIReader.Get(ctx, types.NamespacedName{Namespace: in.Namespace, Name: secretName(in)}, secret); client.IgnoreNotFound(err) != nil {
-		return ctrl.Result{}, err
-	}
-	children := []client.Object{}
-	for i := range pvcs.Items {
-		children = append(children, &pvcs.Items[i])
-	}
-	if secret.Name != "" {
-		children = append(children, secret)
-	}
+	orphan := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"ownerReferences":null}}`))
 	for _, obj := range children {
 		var err error
-		if retain {
-			patch := client.MergeFrom(obj.DeepCopyObject().(client.Object))
-			obj.SetOwnerReferences(nil)
-			err = r.Patch(ctx, obj, patch)
+		if in.Spec.DeletionPolicy == pgv1.DeletionPolicyRetain {
+			err = r.Patch(ctx, obj, orphan)
 		} else {
 			err = r.Delete(ctx, obj)
 		}

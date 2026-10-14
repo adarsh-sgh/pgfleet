@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -249,7 +250,11 @@ func TestSurvivesRestartMidReconcile(t *testing.T) {
 			} else {
 				must(t, k8s.Create(ctx, in))
 			}
-			<-crashed
+			select {
+			case <-crashed:
+			case <-time.After(30 * time.Second):
+				t.Fatalf("reconcile never reached step %q", tc.step)
+			}
 			stop()
 
 			startManager(t, controller.Options{Creds: creds})
