@@ -30,6 +30,7 @@ type WarmPoolReconciler struct {
 	// "expectations" trick the ReplicaSet controller uses to avoid double-creating on cache lag.
 	mu      sync.Mutex
 	created map[types.NamespacedName]map[string]time.Time
+	secrets sync.Map // pool UID -> bootstrap secret known to exist
 }
 
 func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -159,11 +160,18 @@ func (r *WarmPoolReconciler) ensurePVC(ctx context.Context, pool *pgv1.WarmPool,
 	return client.IgnoreAlreadyExists(err)
 }
 
+// ensureSecret checks the apiserver once per pool UID per process; pools reconcile on every claim.
 func (r *WarmPoolReconciler) ensureSecret(ctx context.Context, pool *pgv1.WarmPool) (string, error) {
 	name := pool.Name + "-bootstrap"
+	if _, ok := r.secrets.Load(pool.UID); ok {
+		return name, nil
+	}
 	err := r.APIReader.Get(ctx, types.NamespacedName{Namespace: pool.Namespace, Name: name}, &corev1.Secret{})
 	if apierrors.IsNotFound(err) {
 		err = client.IgnoreAlreadyExists(r.Create(ctx, buildSecret(name, pool.Namespace, map[string]string{LabelPool: pool.Name}, ownerRef(pool, "WarmPool"))))
+	}
+	if err == nil {
+		r.secrets.Store(pool.UID, true)
 	}
 	return name, err
 }

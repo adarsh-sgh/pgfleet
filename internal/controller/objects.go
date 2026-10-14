@@ -106,9 +106,12 @@ func buildService(in *pgv1.PostgresInstance, owner metav1.OwnerReference) *corev
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: in.Name, Namespace: in.Namespace,
 			Labels: withManaged(map[string]string{LabelInstance: in.Name}), OwnerReferences: []metav1.OwnerReference{owner}},
+		// Headless: DNS resolves straight to the pod. A ClusterIP per instance cost ~200ms of IP
+		// allocation per create in the load test and a kube-proxy rule set per instance on every node.
 		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{LabelInstance: in.Name},
-			Ports:    []corev1.ServicePort{{Name: "postgres", Port: 5432, TargetPort: intstr.FromInt32(5432)}},
+			ClusterIP: corev1.ClusterIPNone,
+			Selector:  map[string]string{LabelInstance: in.Name},
+			Ports:     []corev1.ServicePort{{Name: "postgres", Port: 5432, TargetPort: intstr.FromInt32(5432)}},
 		},
 	}
 }

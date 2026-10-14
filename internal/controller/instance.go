@@ -504,8 +504,10 @@ func (r *InstanceReconciler) finalize(ctx context.Context, in *pgv1.PostgresInst
 		return ctrl.Result{}, err
 	}
 	pvcs := &corev1.PersistentVolumeClaimList{}
-	if err := r.APIReader.List(ctx, pvcs, sel...); err != nil {
-		return ctrl.Result{}, err
+	if in.Spec.Storage != nil { // storage cannot be added later, so ephemeral instances never own a volume
+		if err := r.APIReader.List(ctx, pvcs, sel...); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 	secret := &corev1.Secret{}
 	if err := r.APIReader.Get(ctx, types.NamespacedName{Namespace: in.Namespace, Name: secretName(in)}, secret); client.IgnoreNotFound(err) != nil {

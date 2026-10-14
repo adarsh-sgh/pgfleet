@@ -46,6 +46,7 @@ func main() {
 
 	cfg := ctrl.GetConfigOrDie()
 	cfg.QPS, cfg.Burst = float32(qps), burst
+	controller.InstrumentAPI(cfg)
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		Cache:                  controller.CacheOptions(),
