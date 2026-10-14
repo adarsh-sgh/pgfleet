@@ -105,9 +105,14 @@ func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if st == pool.Status {
 		return res, nil
 	}
-	patch := client.MergeFrom(pool.DeepCopy())
+	patch := client.MergeFromWithOptions(pool.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	pool.Status = st
-	return res, client.IgnoreNotFound(r.Status().Patch(ctx, pool, patch))
+	if err := r.Status().Patch(ctx, pool, patch); apierrors.IsConflict(err) {
+		return ctrl.Result{Requeue: true}, nil
+	} else if err != nil {
+		return res, client.IgnoreNotFound(err)
+	}
+	return res, nil
 }
 
 func (r *WarmPoolReconciler) createPods(ctx context.Context, pool *pgv1.WarmPool, t template, hash, secret string, n int) error {

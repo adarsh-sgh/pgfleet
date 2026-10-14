@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -35,6 +36,8 @@ type InstanceReconciler struct {
 	Step func(ctx context.Context, step string) error
 	// ClusterIPServices gives each instance a virtual IP instead of a headless Service.
 	ClusterIPServices bool
+
+	bound sync.Map // instance key -> pod name claimed/created by this process
 }
 
 // +kubebuilder:rbac:groups=pgfleet.dev,resources=postgresinstances;warmpools,verbs=get;list;watch;update;patch
@@ -73,7 +76,13 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if equality.Semantic.DeepEqual(orig.Status, in.Status) {
 		return res, err
 	}
-	if perr := r.Status().Patch(ctx, in, client.MergeFrom(orig)); perr != nil && !apierrors.IsNotFound(perr) {
+	// Optimistic lock: a merge patch diffed against a stale cached status would silently skip
+	// fields that only look unchanged, leaving e.g. phase and conditions out of sync.
+	perr := r.Status().Patch(ctx, in, client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{}))
+	switch {
+	case apierrors.IsConflict(perr):
+		return ctrl.Result{Requeue: true}, err // newer object is on its way through the cache
+	case perr != nil && !apierrors.IsNotFound(perr):
 		return ctrl.Result{}, errors.Join(err, perr)
 	}
 	return res, err
@@ -142,26 +151,39 @@ func (r *InstanceReconciler) converge(ctx context.Context, in *pgv1.PostgresInst
 	return ctrl.Result{}, nil
 }
 
-// findPod returns the pod already bound to the instance. A cache miss is confirmed against the
-// apiserver: a claim from the previous reconcile may not have reached the informer yet, and
-// trusting the miss would claim a second pod.
+// findPod returns the pod bound to the instance. The cache can lag a claim this process made a
+// moment ago, and trusting that miss would claim a second pod, so binds are remembered in
+// r.bound and confirmed with an uncached GET by name. After a restart the map is empty, but the
+// cache was filled by a fresh LIST that already contains every earlier claim.
 func (r *InstanceReconciler) findPod(ctx context.Context, in *pgv1.PostgresInstance) (*corev1.Pod, error) {
-	sel := client.MatchingLabels{LabelInstance: in.Name}
+	key := client.ObjectKeyFromObject(in)
 	pods := &corev1.PodList{}
-	if err := r.List(ctx, pods, client.InNamespace(in.Namespace), sel); err != nil {
+	if err := r.List(ctx, pods, client.InNamespace(in.Namespace), client.MatchingLabels{LabelInstance: in.Name}); err != nil {
 		return nil, err
-	}
-	if len(pods.Items) == 0 {
-		if err := r.APIReader.List(ctx, pods, client.InNamespace(in.Namespace), sel); err != nil {
-			return nil, err
-		}
 	}
 	for i := range pods.Items {
 		if p := &pods.Items[i]; metav1.IsControlledBy(p, in) {
+			r.bound.Delete(key) // cache caught up
 			return p, nil
 		}
 	}
-	return nil, nil
+	name, ok := r.bound.Load(key)
+	if !ok {
+		return nil, nil
+	}
+	pod := &corev1.Pod{}
+	err := r.APIReader.Get(ctx, types.NamespacedName{Namespace: in.Namespace, Name: name.(string)}, pod)
+	switch {
+	case apierrors.IsNotFound(err):
+		r.bound.Delete(key)
+		return nil, nil
+	case err != nil:
+		return nil, err
+	case !metav1.IsControlledBy(pod, in):
+		r.bound.Delete(key)
+		return nil, nil
+	}
+	return pod, nil
 }
 
 // claim takes a ready warm pod from the instance's pool. The pod patch carries the cached
@@ -200,6 +222,7 @@ func (r *InstanceReconciler) claim(ctx context.Context, in *pgv1.PostgresInstanc
 			return nil, err
 		}
 		if ok {
+			r.bound.Store(client.ObjectKeyFromObject(in), p.Name)
 			claims.WithLabelValues("warm").Inc()
 			return p, r.step(ctx, "claimed")
 		}
@@ -284,6 +307,7 @@ func (r *InstanceReconciler) createCold(ctx context.Context, in *pgv1.PostgresIn
 			return nil, err
 		}
 	}
+	r.bound.Store(client.ObjectKeyFromObject(in), pod.Name)
 	claims.WithLabelValues("cold").Inc()
 	return pod, r.step(ctx, "pod")
 }
@@ -549,6 +573,7 @@ func (r *InstanceReconciler) finalize(ctx context.Context, in *pgv1.PostgresInst
 	if err := r.step(ctx, "children-released"); err != nil {
 		return ctrl.Result{}, err
 	}
+	r.bound.Delete(client.ObjectKeyFromObject(in))
 	patch := client.MergeFrom(in.DeepCopy())
 	controllerutil.RemoveFinalizer(in, Finalizer)
 	return ctrl.Result{}, client.IgnoreNotFound(r.Patch(ctx, in, patch))
