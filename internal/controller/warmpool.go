@@ -27,6 +27,7 @@ type WarmPoolReconciler struct {
 	APIReader client.Reader
 	Expect    *poolExpectations
 	secrets   sync.Map // pool UID -> bootstrap secret known to exist
+	statusAt  sync.Map // pool UID -> last status write
 }
 
 // poolExpectations tracks pods a pool created that the cache has not shown yet, the trick the
@@ -138,6 +139,17 @@ func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if st == pool.Status {
 		return res, nil
 	}
+	// Counts change on every claim and every pod that turns ready; write them at most once a
+	// second per pool (they were ~2.7 writes per instance created, all to the same 10 objects).
+	if last, ok := r.statusAt.Load(pool.UID); ok && st.ObservedGeneration == pool.Status.ObservedGeneration {
+		if wait := time.Second - time.Since(last.(time.Time)); wait > 0 {
+			if res.RequeueAfter == 0 || wait < res.RequeueAfter {
+				res.RequeueAfter = wait
+			}
+			return res, nil
+		}
+	}
+	r.statusAt.Store(pool.UID, time.Now())
 	patch := client.MergeFromWithOptions(pool.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	pool.Status = st
 	if err := r.Status().Patch(ctx, pool, patch); apierrors.IsConflict(err) {

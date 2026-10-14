@@ -122,7 +122,8 @@ func Setup(mgr ctrl.Manager, o Options) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("warmpool").
-		For(&pgv1.WarmPool{}).
+		// Without this, every status write re-triggers the pool (and wrote again).
+		For(&pgv1.WarmPool{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		// Owner handler enqueues the old owner too, so a claim (owner moves to the instance) refills.
 		Owns(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: o.PoolWorkers}).
