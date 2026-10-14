@@ -98,7 +98,7 @@ func main() {
 	rep := report{Label: *label, ManagerArgs: *managerArgs, Instances: *instances}
 	name := func(i int) (string, string) { return fmt.Sprintf("load-%d", i%*namespaces), fmt.Sprintf("db-%05d", i) }
 
-	mgr := startManager()
+	mgr = startManager()
 
 	// Phase 1: warm pools.
 	before := scrape()
@@ -156,18 +156,7 @@ func main() {
 	// The watch gives per-instance latency; completion is checked by listing, so an event lost
 	// across a watch reconnect cannot stall the run (it only shrinks the latency sample).
 	waitFor("instances ready", func() bool {
-		if readyCount.Load() >= int64(*instances) {
-			return true
-		}
-		list := &pgv1.PostgresInstanceList{}
-		check(c.List(ctx, list))
-		ready := 0
-		for _, in := range list.Items {
-			if meta.IsStatusConditionTrue(in.Status.Conditions, pgv1.CondReady) {
-				ready++
-			}
-		}
-		return ready >= *instances
+		return readyCount.Load() >= int64(*instances) || countReadyInstances(ctx, c) >= *instances
 	})
 	stopWatch()
 	p := diff("create", time.Since(t0), before, scrape())
@@ -182,7 +171,7 @@ func main() {
 	// Phase 3: kill -9 the operator and start a fresh one; it lists the whole fleet into a cold
 	// cache and reconciles every instance once.
 	check(mgr.Process.Signal(syscall.SIGKILL))
-	_ = mgr.Wait()
+	waitExit(mgr)
 	t0 = time.Now()
 	mgr = startManager()
 	inst := isInstanceController
@@ -203,12 +192,11 @@ func main() {
 	waitFor("instances deleted", func() bool {
 		list := &metav1.PartialObjectMetadataList{}
 		list.SetGroupVersionKind(pgv1.GroupVersion.WithKind("PostgresInstanceList"))
-		check(c.List(ctx, list))
-		return len(list.Items) == 0
+		return c.List(ctx, list, client.Limit(1)) == nil && len(list.Items) == 0
 	})
 	rep.Phases = append(rep.Phases, diff("delete", time.Since(t0), before, scrape()))
 	_ = mgr.Process.Signal(syscall.SIGTERM)
-	_ = mgr.Wait()
+	waitExit(mgr)
 
 	b, _ := json.MarshalIndent(rep, "", "  ")
 	fmt.Println(string(b))
@@ -245,13 +233,24 @@ func watchReady(ctx context.Context, c client.WithWatch, f func(*pgv1.PostgresIn
 	}
 }
 
+// mgr is the operator child process; check() kills it so a failed run never leaves an orphan
+// holding the metrics port for the next one.
+var mgr *exec.Cmd
+
 func startManager() *exec.Cmd {
 	logf, err := os.OpenFile(*managerLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	check(err)
 	cmd := exec.Command(*managerBin, strings.Fields(*managerArgs)...)
 	cmd.Stdout, cmd.Stderr = logf, logf
 	check(cmd.Start())
+	exited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(exited) }()
 	waitFor("operator ready", func() bool {
+		select {
+		case <-exited:
+			check(fmt.Errorf("operator exited during startup, see %s", *managerLog))
+		default:
+		}
 		resp, err := http.Get(*readyzURL)
 		if err != nil {
 			return false
@@ -259,20 +258,55 @@ func startManager() *exec.Cmd {
 		resp.Body.Close()
 		return resp.StatusCode == http.StatusOK
 	})
+	exitedCh[cmd] = exited
 	return cmd
 }
 
+var exitedCh = map[*exec.Cmd]chan struct{}{}
+
+func waitExit(cmd *exec.Cmd) { <-exitedCh[cmd] }
+
 func countPods(ctx context.Context, c client.Client) (total, ready int) {
-	pods := &corev1.PodList{}
-	check(c.List(ctx, pods, client.MatchingLabels{"app.kubernetes.io/managed-by": "pgfleet"}))
-	for _, p := range pods.Items {
-		if p.Status.Phase == corev1.PodRunning && slices.ContainsFunc(p.Status.Conditions, func(c corev1.PodCondition) bool {
-			return c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue
-		}) {
-			ready++
+	listAll(ctx, c, &corev1.PodList{}, func(l client.ObjectList) {
+		for _, p := range l.(*corev1.PodList).Items {
+			total++
+			if p.Status.Phase == corev1.PodRunning && slices.ContainsFunc(p.Status.Conditions, func(c corev1.PodCondition) bool {
+				return c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue
+			}) {
+				ready++
+			}
+		}
+	}, client.MatchingLabels{"app.kubernetes.io/managed-by": "pgfleet"})
+	return total, ready
+}
+
+func countReadyInstances(ctx context.Context, c client.Client) (ready int) {
+	listAll(ctx, c, &pgv1.PostgresInstanceList{}, func(l client.ObjectList) {
+		for _, in := range l.(*pgv1.PostgresInstanceList).Items {
+			if meta.IsStatusConditionTrue(in.Status.Conditions, pgv1.CondReady) {
+				ready++
+			}
+		}
+	})
+	return ready
+}
+
+// listAll pages through a list 500 items at a time, retrying transient errors: one 20k-item
+// response is enough to push a laptop apiserver into memory trouble.
+func listAll(ctx context.Context, c client.Client, l client.ObjectList, f func(client.ObjectList), opts ...client.ListOption) {
+	cont := ""
+	for {
+		err := c.List(ctx, l, append(opts, client.Limit(500), client.Continue(cont))...)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "list:", err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		f(l)
+		if cont = l.(metav1.ListInterface).GetContinue(); cont == "" {
+			return
 		}
 	}
-	return len(pods.Items), ready
 }
 
 func isInstanceController(m *dto.Metric) bool {
@@ -306,10 +340,10 @@ func waitFor(what string, ok func() bool) {
 		if time.Since(start) > 15*time.Minute {
 			check(fmt.Errorf("timed out waiting for %s", what))
 		}
-		if i%15 == 0 {
+		if i%5 == 0 {
 			fmt.Fprintf(os.Stderr, "waiting for %s (%s)\n", what, time.Since(start).Round(time.Second))
 		}
-		time.Sleep(time.Second)
+		time.Sleep(3 * time.Second)
 	}
 }
 
@@ -467,6 +501,9 @@ func round(v float64) float64 { return math.Round(v*10000) / 10000 }
 func check(err error) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		if mgr != nil && mgr.Process != nil {
+			_ = mgr.Process.Kill()
+		}
 		os.Exit(1)
 	}
 }

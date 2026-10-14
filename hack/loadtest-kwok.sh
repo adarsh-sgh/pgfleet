@@ -22,9 +22,23 @@ export KUBECONFIG=$PWD/results/raw/kwok.kubeconfig
 mkdir -p results/raw
 
 kwokctl delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
-kwokctl create cluster --name "$CLUSTER" --runtime "$RUNTIME" --kubeconfig "$KUBECONFIG" --disable-qps-limits \
+BINS=()
+if [ "$RUNTIME" = binary ] && [ -x bin/k8s/kube-apiserver ]; then # from hack/build-k8s-binaries.sh
+  BINS=(--kube-apiserver-binary "$PWD/bin/k8s/kube-apiserver" --kube-scheduler-binary "$PWD/bin/k8s/kube-scheduler"
+    --kube-controller-manager-binary "$PWD/bin/k8s/kube-controller-manager" --kwok-controller-binary "$PWD/bin/k8s/kwok"
+    --etcd-binary "$PWD/bin/k8s/etcd")
+fi
+kwokctl create cluster --name "$CLUSTER" --runtime "$RUNTIME" --kubeconfig "$KUBECONFIG" --disable-qps-limits ${BINS[@]+"${BINS[@]}"} \
   --extra-args kube-apiserver=service-cluster-ip-range=10.0.0.0/16
-trap 'kwokctl delete cluster --name "$CLUSTER" >/dev/null 2>&1' EXIT
+cleanup() {
+  if [ "$RUNTIME" = docker ]; then # record component restarts/OOM kills, then a memory snapshot
+    docker inspect -f '{{.Name}} restarts={{.RestartCount}} oomkilled={{.State.OOMKilled}}' \
+      $(docker ps -aq --filter "name=kwok-$CLUSTER") >"results/raw/components-$LABEL.txt" 2>&1 || true
+  fi
+  pkill -f "bin/manager -metrics-bind-address :19080" 2>/dev/null || true
+  kwokctl delete cluster --name "$CLUSTER" >/dev/null 2>&1
+}
+trap cleanup EXIT
 
 kwokctl scale node --name "$CLUSTER" --replicas "$NODES" \
   --param '.allocatable.pods=1000' --param '.allocatable.cpu="1000"' --param '.allocatable.memory="4Ti"'
